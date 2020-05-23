@@ -1,0 +1,27 @@
+{
+  "name": "GC Tools",
+  "description": "Tools for Genesys Cloud web users.",
+  "version": "0.1",
+  "manifest_version": 2,
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "icons": {
+    "16": "images/icon_16.png",
+    "32": "images/icon_32.png",
+    "48": "images/icon_48.png",
+    "128": "images/icon_128.png"
+  },
+  "permissions": [
+    "tabs",
+    "webNavigation",
+    "webRequest",
+    "system.cpu",
+    "system.memory",
+    "notifications",
+    "<all_urls>",
+    "downloads",
+    "storage",
+    "downloads.shelf"
+  ]
+}
