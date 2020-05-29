@@ -1,7 +1,7 @@
 {
   "name": "GC Tools",
   "description": "Tools for Genesys Cloud web users.",
-  "version": "0.1",
+  "version": "0.2",
   "manifest_version": 2,
   "background": {
     "scripts": ["background.js"]
@@ -16,12 +16,10 @@
     "tabs",
     "webNavigation",
     "webRequest",
-    "system.cpu",
     "system.memory",
     "notifications",
     "<all_urls>",
     "downloads",
-    "storage",
     "downloads.shelf"
   ]
 }

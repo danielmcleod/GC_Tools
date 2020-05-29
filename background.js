@@ -1,8 +1,18 @@
-let lastScreenshot = Date.now();
-let screenShots = 0;
-let lastNetworkUp = Date.now();
-let lastNetworkState = 1;
-let networkTestInterval = null;
+let _lastScreenshot = Date.now();
+let _screenShots = 0;
+let _lastNetworkUp = Date.now();
+let _lastNetworkState = 1;
+let _networkTestInterval = null;
+let _gcTabId = null;
+let _savingScreenshot = false;
+let _savingLog = false;
+//logs
+let _wsErrors = [];
+let _errors = [];
+let _memUsage = [];
+let _internetConnectivity = [];
+let _screenShotLog = [];
+let _networkConnectivity = [];
 
 const filter = {
     urls: [
@@ -18,84 +28,107 @@ const filter = {
 const apiFilter = {
     urls: [
         "*://api.mypurecloud.com/*",
-        // "*://api.mypurecloud.de/*",
-        // "*://api.mypurecloud.ie/*",
-        // "*://api.mypurecloud.com.au/*",
-        // "*://api.mypurecloud.jp/*",
-        // "*://api.*.pure.cloud/*" //not valid
+        "wss://streaming.mypurecloud.com/*"
     ]
 };
 
-takeScreenshot = (folderName,uuid,date) => {
+takeScreenshot = (uuid) => {
+    if(_savingScreenshot){
+        return;
+    }
+
+    _savingScreenshot = true;
     const now = Date.now();
-    var diff = Math.abs(now - lastScreenshot);
+    var diff = Math.abs(now - _lastScreenshot);
     var minutes = Math.floor((diff/1000)/60);
 
-    var diffNetwork = Math.abs(now - lastNetworkUp);
+    var diffNetwork = Math.abs(now - _lastNetworkUp);
     var minutesNetwork = Math.floor((diffNetwork/1000)/60);
+    const date = getDate();
+    const folderName = date.slice(0,10);
 
     const fileName = `gc_tools/${folderName}/screenshot-${now}.jpg`;
-    if((minutesNetwork < 6 && minutes > 0) || screenShots === 0){
-        chrome.tabs.captureVisibleTab(null, {format: "jpeg", quality: 5}, (img) => {
-            lastScreenshot = Date.now();
-            screenShots++;
-            // console.log(img);
-            downloadScreenshot(img,fileName);
-            updateLog({logId: uuid,date,fileName});
-            testNetwork(uuid,date);
-        });
-    } else {
-        testNetwork(uuid,date);
+    if((minutesNetwork < 6 && minutes > 0) || _screenShots === 0){
+        try{
+            chrome.tabs.captureVisibleTab(chrome.windows.WINDOW_ID_CURRENT, {format: "jpeg", quality: 10}, (img) => {
+                if((img||null) !== null){
+                    _lastScreenshot = Date.now();
+                    _screenShots++;
+                    downloadScreenshot(img,fileName);
+                    _screenShotLog.push({
+                        title: 'Screenshot Generated',
+                        summary: fileName,
+                        date: date,
+                        id: uuid
+                    })
+                } else {
+                }
+            });
+        } catch (e) {
+            _savingScreenshot = false;
+            console.log("Screenshot Error:" + e);
+        }
     }
 };
 
 downloadScreenshot = (screenShot,fileName) => {
-    const now = Date.now();
-    chrome.downloads.setShelfEnabled(false);
-    chrome.downloads.download({
-        'url': screenShot,
-        'filename': fileName,
-    },() => {
-        setTimeout(() => {
-            chrome.downloads.setShelfEnabled(true);
-        }, 500);
-    })
+    try{
+        const now = Date.now();
+        chrome.downloads.setShelfEnabled(false);
+        chrome.downloads.download({
+            'url': screenShot,
+            'filename': fileName,
+        },() => {
+            _savingScreenshot = false;
+            setTimeout(() => {
+                chrome.downloads.setShelfEnabled(true);
+            }, 500);
+        })
+    } catch (e) {
+        _savingScreenshot = false;
+        console.log("Screenshot Error:" + e);
+    }
 };
 
-getCpuInfo = () => {
-    chrome.system.cpu.getInfo((info) => {
-        console.log("CPU Usage:");
+// getCpuInfo = () => {
+//     chrome.system.cpu.getInfo((info) => {
+//         console.log("CPU Usage:");
+//
+//         for (let i = 0; i < info.processors.length; i++) {
+//             const usage = info.processors[i].usage;
+//             console.log(usage)
+//         }
+//     });
+// };
 
-        for (let i = 0; i < info.processors.length; i++) {
-            const usage = info.processors[i].usage;
-            console.log(usage)
-        }
-    });
-};
-
-getMemoryInfo = (uuid,date) => {
+getMemoryInfo = (uuid) => {
     let capacity = 0;
     let availableCapacity = 0;
     chrome.system.memory.getInfo((info) => {
         capacity = info.capacity;
         availableCapacity = info.availableCapacity;
+
         console.log('Total Memory: ' + capacity);
         console.log('Available Memory: ' + availableCapacity);
-        updateLog({logId: uuid,date,capacity,availableCapacity});
-        checkForOtherTabs(null,uuid,date);
+        const date = getDate();
+
+        _memUsage.push({
+            title: 'Memory Usage',
+            summary: `${(capacity-availableCapacity)} / ${capacity}`,
+            date: date,
+            id: uuid
+        })
     });
 };
 
-checkForOtherTabs = (tabId,uuid,date) => {
+checkForOtherTabs = (tabId) => {
     let gcTabCount = 0;
-    let tabUrls = [];
 
     chrome.windows.getAll({populate: true}, (windows) => {
         windows.map((window) => {
             window.tabs.map((tab) => {
                 try {
                     // console.log(tab.url);
-                    tabUrls.push(tab.url);
                     if(isGenesysCloudUrl(tab.url)){
                         gcTabCount++;
                     }
@@ -107,7 +140,12 @@ checkForOtherTabs = (tabId,uuid,date) => {
         });
 
         if(gcTabCount > 1){
-            updateLog({logId: uuid,date,gcTabCount,tabUrls});
+            const date = getDate();
+            generateLog([{
+                title: 'Multiple Tabs',
+                summary: 'Multiple Genesys Cloud Tabs Detected. The duplicate tab was closed.',
+                date: date,
+            }],'MultipleTabs'); //todo:
             console.log("Genesys Cloud Tabs: " + gcTabCount);
             if((tabId||null) !== null){
                 const options = {
@@ -118,22 +156,20 @@ checkForOtherTabs = (tabId,uuid,date) => {
                     iconUrl:'../images/icon_128.png'
                 };
                 chrome.notifications.create("", options, (id) => {});
-                updateLog({logId: uuid,date,closedTab: true});
                 chrome.tabs.remove(tabId);
             }
+        } else {
+            _gcTabId = tabId;
         }
-        // else {
-        //     updateLog({logId: uuid,date,gcTabCount});
-        // }
-
     });
 };
 
 isGenesysCloudUrl = (url) => {
-    return url.includes("apps.mypurecloud") ? true : false;
+    return (url.includes("apps.mypurecloud") || url.includes("streaming.mypurecloud")) ? true : false;
 };
 
-testNetwork = (uuid,date) => {
+testNetwork = (uuid) => {
+    testConnection(uuid);
     let networkUp = false;
     const now = Date.now().toString();
 
@@ -142,30 +178,29 @@ testNetwork = (uuid,date) => {
             const status = response.status;
             if(status === 200){
                 networkUp = true;
-                if((networkTestInterval||null) !== null){
-                    clearInterval(networkTestInterval);
-                    networkTestInterval = null;
+                if((_networkTestInterval||null) !== null){
+                    clearInterval(_networkTestInterval);
+                    _networkTestInterval = null;
                 }
 
-                console.log("last: "+ lastNetworkState)
-                const prevState = lastNetworkState === 0 ? 0 : 1;
-                lastNetworkState = 1;
+                const prevState = _lastNetworkState === 0 ? 0 : 1;
+                _lastNetworkState = 1;
 
-                lastNetworkUp = Date.now();
-                console.log("prev: "+ prevState)
+                _lastNetworkUp = Date.now();
                 console.log("Can reach internet? : " + networkUp);
-                updateLog({logId: uuid,date,networkUp});
+                const date = getDate();
+
+                _internetConnectivity.push({
+                    title: 'Internet Connectivity',
+                    summary: 'true',
+                    date: date,
+                    id: uuid
+                });
 
                 if(prevState === 0){
-                    chrome.storage.local.get(['logs'], (result) => {
-                        let logs = result.logs||[];
-                        if(logs.length > 0){
-                            downloadLogs(logs);
-                        }
-                    });
-                }
-                else {
-                    getMemoryInfo(uuid,date);
+                    setTimeout(() => {
+                        generateAllLogs();
+                    }, 5000);
                 }
             } else {
                 let error = new Error(response.statusText);
@@ -177,66 +212,88 @@ testNetwork = (uuid,date) => {
 
         })
         .catch((error) => {
-            lastNetworkState = 0;
+            _lastNetworkState = 0;
             console.log("Can reach internet? : " + false);
-            updateLog({logId: uuid,date,networkUp: false});
+            const date = getDate();
+
+            _internetConnectivity.push({
+                title: 'Internet Connectivity',
+                summary: 'false',
+                date: date,
+                id: uuid
+            });
+
             const d = new Date().toJSON();
-            if((networkTestInterval||null) === null){
-                networkTestInterval = setInterval(() => testNetwork(uuid,d), 2000);
-                getMemoryInfo(uuid,date);
+            if((_networkTestInterval||null) === null){
+                _networkTestInterval = setInterval(() => testNetwork(uuid,d), 2000);
             }
         })
 };
 
-downloadLogs = (logs) => {
+testConnection = (uuid) => {
+    const networkConnected = navigator.onLine;
+    console.log("Connected to local network?:" + networkConnected);
+
+    const date = getDate();
+
+    _networkConnectivity.push({
+        title: 'Network Connectivity',
+        summary: networkConnected.toString(),
+        date: date,
+        id: uuid
+    });
+};
+
+generateAllLogs = () => {
+    const logs = _errors.concat(_memUsage,_screenShotLog,_internetConnectivity,_networkConnectivity);
+    if(logs.length > 0){
+        logs.sort((a, b) => b.date - a.date);
+        generateLog(logs,'Log');
+        __wsErrors = [];
+        __errors = [];
+        __memUsage = [];
+        __internetConnectivity = [];
+        _screenShotLog = [];
+        __networkConnectivity = [];
+    }
+};
+
+generateLog = (logs,filename) => {
+    if(_savingLog){
+        return;
+    }
+    _savingLog = true;
     try{
         const now = Date.now();
         const date = new Date().toJSON().slice(0,10);
         var json = JSON.stringify(logs);
         var blob = new Blob([json], {type: "application/json"});
         var url  = URL.createObjectURL(blob);
-        chrome.downloads.setShelfEnabled(false);
-        chrome.downloads.download({
-            'url': url,
-            'filename': `gc_tools/${date}/log-${now}.json`,
-        },() => {
-            chrome.storage.local.set({logs: []}, () => {
-                // console.log('Value is set to ' + value);
-            });
-            setTimeout(() => {
-                chrome.downloads.setShelfEnabled(true);
-            }, 500);
-        })
+        if((url||null) !== null){
+            chrome.downloads.setShelfEnabled(false);
+            chrome.downloads.download({
+                'url': url,
+                'filename': `gc_tools/${date}/${filename}-${now}.json`,
+            },() => {
+                _savingLog = false;
+                setTimeout(() => {
+                    chrome.downloads.setShelfEnabled(true);
+                }, 500);
+            })
+        } else {
+            console.error("Error downloading logs..");
+            _savingLog = false;
+        }
     }
     catch (e) {
+        _savingLog = false;
         console.error(e);
     }
 };
 
-updateLog = (entry) => {
-    chrome.storage.local.get(['logs'], (result) => {
-        let logs = result.logs||[];
-        logs.push(entry);
-        if(logs.length >= 25){
-            downloadLogs(logs);
-        } else {
-            chrome.storage.local.set({logs: logs}, () => {
-                // console.log('Value is set to ' + value);
-            });
-        }
-    });
-};
-
-checkForLogs = () => {
-    chrome.storage.local.get(['logs'], (result) => {
-        let logs = result.logs||null;
-        if((logs||null) !== null && logs.length > 0){
-            downloadLogs(logs);
-            chrome.storage.local.set({logs: []}, () => {
-                // console.log('Value is set to ' + value);
-            });
-        }
-    });
+getDate = () => {
+    const date = new Date().toJSON();
+    return date;
 };
 
 uuidv4 = () => {
@@ -248,19 +305,63 @@ uuidv4 = () => {
 chrome.webNavigation.onCompleted.addListener((tab) => {
     if(tab.frameId === 0){
         const tabId = tab.tabId;
-        const uuid = uuidv4();
-        checkForOtherTabs(tabId,uuid);
+        checkForOtherTabs(tabId);
     }
 }, filter );
 
 chrome.webRequest.onErrorOccurred.addListener((e) => {
-    const date = new Date().toJSON();
+    //save on browser close or periodically
+    //potentially remove filter and do a network check on all failed requests
+    //periodically check network and resource usage
+
+    console.log("WebRequest Error:" + JSON.stringify(e));
+
+    //error
+    //method
+    //type
+    //url
+
     const uuid = uuidv4();
-    const networkConnected = navigator.onLine;
-    console.log("Connected to local network?:" + networkConnected);
-    updateLog({logId: uuid,date,networkConnected});
-    takeScreenshot(date.slice(0,10),uuid,date);
+    const date = getDate();
+
+    if(e.type === 'websocket'){
+        _wsErrors.push({
+            title: 'WebRequest Websocket Error',
+            summary: JSON.stringify(e),
+            date: date,
+            id: uuid
+        });
+
+        if(_wsErrors.length > 4 && _lastNetworkState === 1){
+            testNetwork(uuid);
+            takeScreenshot(uuid);
+            getMemoryInfo(uuid);
+        }
+    } else {
+        _errors.push({
+            title: 'WebRequest Error',
+            summary: JSON.stringify(e),
+            date: date,
+            id: uuid
+        });
+
+        if(_lastNetworkState === 1){
+            testNetwork(uuid);
+            takeScreenshot(uuid);
+            getMemoryInfo(uuid);
+        }
+    }
 }, apiFilter );
 
+chrome.windows.onRemoved.addListener(() => {
+    generateAllLogs();
+})
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+    if(_gcTabId === tabId){
+        _gcTabId = null;
+        generateAllLogs();
+    }
+})
+
 console.log("gc_tools loaded..");
-checkForLogs();
