@@ -245,16 +245,16 @@ testConnection = (uuid) => {
 };
 
 generateAllLogs = () => {
-    const logs = _errors.concat(_memUsage,_screenShotLog,_internetConnectivity,_networkConnectivity);
+    const logs = _errors.concat(_wsErrors,_memUsage,_screenShotLog,_internetConnectivity,_networkConnectivity);
     if(logs.length > 0){
         logs.sort((a, b) => b.date - a.date);
         generateLog(logs,'Log');
-        __wsErrors = [];
-        __errors = [];
-        __memUsage = [];
-        __internetConnectivity = [];
+        _wsErrors = [];
+        _errors = [];
+        _memUsage = [];
+        _internetConnectivity = [];
         _screenShotLog = [];
-        __networkConnectivity = [];
+        _networkConnectivity = [];
     }
 };
 

@@ -1,7 +1,7 @@
 {
   "name": "GC Tools",
   "description": "Tools for Genesys Cloud web users.",
-  "version": "0.2",
+  "version": "0.3",
   "manifest_version": 2,
   "background": {
     "scripts": ["background.js"]
